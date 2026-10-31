@@ -44,12 +44,25 @@ client = genai.Client(api_key=api_key)
 
 
 # PDF Metnini Çıkarma Fonksiyonu
-def extract_text_from_pdf(pdf_file):
-  reader = pypdf.PdfReader(pdf_file)
-  text = ""
-  for page in reader.pages:
-    text += page.extract_text() + "\n"
-  return text
+import io
+import pypdf
+
+def extract_text_from_pdf(uploaded_file):
+    text = ""
+    try:
+        # Dosyayı byte olarak alıp temiz bir akış (stream) oluşturuyoruz
+        bytes_data = uploaded_file.getvalue()
+        pdf_stream = io.BytesIO(bytes_data)
+        
+        reader = pypdf.PdfReader(pdf_stream)
+        for page in reader.pages:
+            extracted = page.extract_text()
+            if extracted:
+                text += extracted + "\n"
+    except Exception as e:
+        print(f"PDF okunurken hata oluştu: {e}")
+        
+    return text
 
 
 pdf_context = ""
