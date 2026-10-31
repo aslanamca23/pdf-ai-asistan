@@ -1,24 +1,25 @@
 from google import genai
 from google.genai import types
+from gtts import gTTS
+import os
 import pypdf
 import streamlit as st
 
 # Sayfa Yapılandırması
 st.set_page_config(
-    page_title="PDF & Web Akıllı Asistan", page_icon="🤖", layout="wide"
+    page_title="Sesli PDF & Web Akıllı Asistan", page_icon="🎧", layout="wide"
 )
 
-st.title("🚀 Akıllı PDF & Web Araştırma Asistanı")
+st.title("🎧 Sesli PDF & Web Araştırma Asistanı")
 st.markdown(
-    "Gemini altyapısıyla çalışan; hem yüklediğin PDF'leri okuyan hem de"
-    " internette canlı arama yapabilen yapay zekan!"
+    "Gemini altyapısıyla çalışan; yüklediğin PDF'leri okuyan, internette arama"
+    " yapan ve yanıtları **sesli okuyabilen** yapay zekan!"
 )
 
-# Güvenli API Anahtarı Kontrolü (Streamlit Secrets üzerinden alır)
+# Güvenli API Anahtarı Kontrolü (Streamlit Secrets üzerinden)
 try:
   api_key = st.secrets["GEMINI_API_KEY"]
 except Exception:
-  # Eğer bulutta secrets ayarlanmadıysa local test için sidebar'dan alır
   with st.sidebar:
     st.header("⚙️ Ayarlar")
     api_key = st.text_input("Google Gemini API Key", type="password")
@@ -27,10 +28,7 @@ except Exception:
     )
 
 if not api_key:
-  st.warning(
-      "Lütfen Gemini API Key'ini tanımlayın (Bulutta secrets ayarlanmalı veya"
-      " sidebar'dan girilmeli)."
-  )
+  st.warning("Lütfen Gemini API Key'ini tanımlayın.")
   st.stop()
 
 # Sidebar: Dosya Yükleme
@@ -67,21 +65,24 @@ if "messages" not in st.session_state:
   st.session_state.messages = []
 
 # Geçmiş Mesajları Ekranda Gösterme
-for message in st.session_state.messages:
+for idx, message in enumerate(st.session_state.messages):
   with st.chat_message(message["role"]):
     st.markdown(message["content"])
+    if message["role"] == "assistant" and "audio_path" in message:
+      if os.path.exists(message["audio_path"]):
+        st.audio(message["audio_path"], format="audio/mp3")
 
 # Kullanıcı Girişi
 if prompt := st.chat_input(
-    "Bir şeyler sor (örn: 'Bu PDF'i özetle' veya 'Bugün dünyadaki son yapay"
-    " zeka gelişmeleri neler?')"
+    "Bir şeyler sor (örn: 'Bu PDF'i sesli olarak özetle' veya güncel bir şey"
+    " sor)"
 ):
   st.session_state.messages.append({"role": "user", "content": prompt})
   with st.chat_message("user"):
     st.markdown(prompt)
 
   with st.chat_message("assistant"):
-    with st.spinner("Yapay zeka düşünüyor ve araştırıyor..."):
+    with st.spinner("Yapay zeka düşünüyor, araştırıyor ve ses hazırlıyor..."):
       try:
         system_instruction = (
             "Sen gelişmiş bir araştırma ve PDF analiz asistanısın. Kullanıcının"
@@ -97,8 +98,9 @@ if prompt := st.chat_input(
               f" sorusu/isteği: {prompt}"
           )
 
+        # Güncel model adı kullanıldı: gemini-3.8-flash
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.8-flash",
             contents=full_prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
@@ -109,9 +111,21 @@ if prompt := st.chat_input(
 
         answer = response.text
         st.markdown(answer)
-        st.session_state.messages.append(
-            {"role": "assistant", "content": answer}
-        )
+
+        # Metni Ses Dosyasına Çevirme (gTTS)
+        audio_file_path = f"temp_audio_{len(st.session_state.messages)}.mp3"
+        tts = gTTS(text=answer, lang="tr", slow=False)
+        tts.save(audio_file_path)
+
+        # Ses oynatıcıyı arayüze ekle
+        st.audio(audio_file_path, format="audio/mp3")
+
+        # Mesajı ve ses dosyası yolunu hafızaya kaydet
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": answer,
+            "audio_path": audio_file_path,
+        })
 
       except Exception as e:
         st.error(f"Bir hata oluştu: {e}")
