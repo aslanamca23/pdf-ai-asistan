@@ -108,7 +108,7 @@ if prompt := st.chat_input("Bir şeyler sor (örn: 'Bu PDF'i sesli olarak özetl
 
                 # Model: gemini-2.5-flash (Ücretsiz katmanda Google Arama destekler)
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-3.8-flash",
                     contents=full_prompt,
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
