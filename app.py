@@ -112,7 +112,7 @@ if prompt := st.chat_input("Bir şeyler sor (örn: 'Bu PDF'i sesli olarak özetl
                     contents=full_prompt,
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
-                        tools=[{"google_search": {}}], # Arama aracı
+                        #tools=[{"google_search": {}}], # Arama aracı
                     ),
                 )
 
