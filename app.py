@@ -27,9 +27,12 @@ if not api_key:
 client = genai.Client(api_key=api_key)
 
 # --- PDF Metin Çıkarma (Sadece bir kez, dosya yüklendiğinde) ---
+import pdfplumber # Dosyanın en üstüne ekle
+
 def extract_text_from_pdf(uploaded_file):
     text = ""
     try:
+        # Önce pypdf ile dene (hızlıdır)
         pdf_stream = io.BytesIO(uploaded_file.getvalue())
         reader = pypdf.PdfReader(pdf_stream)
         for page in reader.pages:
@@ -37,7 +40,18 @@ def extract_text_from_pdf(uploaded_file):
             if extracted:
                 text += extracted + "\n"
     except Exception as e:
-        st.error(f"PDF okunurken hata: {e}")
+        # pypdf başarısız olursa pdfplumber ile dene
+        st.warning(f"pypdf okuyamadı, alternatif yöntem deneniyor... (Hata: {e})")
+        try:
+            pdf_stream = io.BytesIO(uploaded_file.getvalue())
+            with pdfplumber.open(pdf_stream) as pdf:
+                for page in pdf.pages:
+                    extracted = page.extract_text()
+                    if extracted:
+                        text += extracted + "\n"
+        except Exception as e2:
+            st.error(f"PDF okunamadı, dosya bozuk olabilir: {e2}")
+            
     return text
 
 # --- Sidebar: Dosya Yükleme ---
