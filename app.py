@@ -1,144 +1,117 @@
 from google import genai
 from google.genai import types
-from gtts import gTTS
+import edge_tts
+import asyncio
 import os
+import io
 import pypdf
 import streamlit as st
 
-# Sayfa Yapılandırması
-st.set_page_config(
-    page_title="Sesli PDF & Web Akıllı Asistan", page_icon="🎧", layout="wide"
-)
-
+# --- Sayfa Yapılandırması ---
+st.set_page_config(page_title="Sesli PDF & Web Asistanı", page_icon="🎧", layout="wide")
 st.title("🎧 Sesli PDF & Web Araştırma Asistanı")
-st.markdown(
-    "Gemini altyapısıyla çalışan; yüklediğin PDF'leri okuyan, internette arama"
-    " yapan ve yanıtları **sesli okuyabilen** yapay zekan!"
-)
 
-# Güvenli API Anahtarı Kontrolü (Streamlit Secrets üzerinden)
+# --- API Anahtarı ---
 try:
-  api_key = st.secrets["GEMINI_API_KEY"]
+    api_key = st.secrets["GEMINI_API_KEY"]
 except Exception:
-  with st.sidebar:
-    st.header("⚙️ Ayarlar")
-    api_key = st.text_input("Google Gemini API Key", type="password")
-    st.markdown(
-        "[Ücretsiz API Key Al](https://aistudio.google.com/app/apikey)"
-    )
+    with st.sidebar:
+        st.header("⚙️ Ayarlar")
+        api_key = st.text_input("Google Gemini API Key", type="password")
+        st.markdown("[Ücretsiz API Key Al](https://aistudio.google.com/app/apikey)")
 
 if not api_key:
-  st.warning("Lütfen Gemini API Key'ini tanımlayın.")
-  st.stop()
+    st.warning("Lütfen Gemini API Key'ini tanımlayın.")
+    st.stop()
 
-# Sidebar: Dosya Yükleme
-with st.sidebar:
-  st.divider()
-  st.markdown("### 📂 Dosya Yükleme")
-  uploaded_file = st.file_uploader(
-      "Bir PDF dosyası yükle", type=["pdf"], key="pdf_uploader"
-  )
-
-# Client Tanımlama
 client = genai.Client(api_key=api_key)
 
-
-# PDF Metnini Çıkarma Fonksiyonu
-import io
-import pypdf
-
+# --- PDF Metin Çıkarma (Sadece bir kez, dosya yüklendiğinde) ---
 def extract_text_from_pdf(uploaded_file):
     text = ""
     try:
-        # Dosyayı byte olarak alıp temiz bir akış (stream) oluşturuyoruz
-        bytes_data = uploaded_file.getvalue()
-        pdf_stream = io.BytesIO(bytes_data)
-        
+        pdf_stream = io.BytesIO(uploaded_file.getvalue())
         reader = pypdf.PdfReader(pdf_stream)
         for page in reader.pages:
             extracted = page.extract_text()
             if extracted:
                 text += extracted + "\n"
     except Exception as e:
-        print(f"PDF okunurken hata oluştu: {e}")
-        
+        st.error(f"PDF okunurken hata: {e}")
     return text
 
+# --- Sidebar: Dosya Yükleme ---
+with st.sidebar:
+    st.divider()
+    st.markdown("### 📂 Dosya Yükleme")
+    uploaded_file = st.file_uploader("Bir PDF dosyası yükle", type=["pdf"], key="pdf_uploader")
 
 pdf_context = ""
 if uploaded_file is not None:
-  with st.spinner("PDF okunuyor ve analiz ediliyor..."):
-    pdf_context = extract_text_from_pdf(uploaded_file)
-  st.sidebar.success(
-      f"'{uploaded_file.name}' başarıyla yüklendi ve hafızaya alındı!"
-  )
+    with st.spinner("PDF okunuyor..."):
+        pdf_context = extract_text_from_pdf(uploaded_file)
+    st.sidebar.success(f"'{uploaded_file.name}' hafızaya alındı!")
 
-# Sohbet Geçmişi Başlatma
+# --- Sohbet Geçmişi ---
 if "messages" not in st.session_state:
-  st.session_state.messages = []
+    st.session_state.messages = []
 
-# Geçmiş Mesajları Ekranda Gösterme
-for idx, message in enumerate(st.session_state.messages):
-  with st.chat_message(message["role"]):
-    st.markdown(message["content"])
-    if message["role"] == "assistant" and "audio_path" in message:
-      if os.path.exists(message["audio_path"]):
-        st.audio(message["audio_path"], format="audio/mp3")
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-# Kullanıcı Girişi
-if prompt := st.chat_input(
-    "Bir şeyler sor (örn: 'Bu PDF'i sesli olarak özetle' veya güncel bir şey"
-    " sor)"
-):
-  st.session_state.messages.append({"role": "user", "content": prompt})
-  with st.chat_message("user"):
-    st.markdown(prompt)
+# --- Edge TTS ile Ses Üretme Fonksiyonu ---
+async def generate_audio(text, voice="tr-TR-AhmetNeural"):
+    communicate = edge_tts.Communicate(text, voice)
+    audio_data = b""
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_data += chunk["data"]
+    return audio_data
 
-  with st.chat_message("assistant"):
-    with st.spinner("Yapay zeka düşünüyor, araştırıyor ve ses hazırlıyor..."):
-      try:
-        system_instruction = (
-            "Sen gelişmiş bir araştırma ve PDF analiz asistanısın. Kullanıcının"
-            " sorularına hem yüklediği PDF belgesindeki bilgileri baz alarak"
-            " hem de internet araması yaparak en doğru, güncel ve yapılandırılmış"
-            " yanıtı ver. Türkçe yanıt ver."
-        )
+# --- Kullanıcı Girişi ---
+if prompt := st.chat_input("Bir şeyler sor (örn: 'Bu PDF'i sesli olarak özetle')"):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-        full_prompt = prompt
-        if pdf_context:
-          full_prompt = (
-              f"İşte yüklenen PDF belgesinin içeriği:\n---\n{pdf_context[:10000]}\n---\n\nKullanıcının"
-              f" sorusu/isteği: {prompt}"
-          )
+    with st.chat_message("assistant"):
+        with st.spinner("Yapay zeka düşünüyor ve ses hazırlıyor..."):
+            try:
+                system_instruction = (
+                    "Sen gelişmiş bir araştırma ve PDF analiz asistanısın. "
+                    "Kullanıcının sorularına hem yüklediği PDF belgesindeki bilgileri baz alarak "
+                    "hem de internet araması yaparak en doğru, güncel ve yapılandırılmış yanıtı ver. "
+                    "Yanıtlarını sesli okunacağı için kısa ve doğal paragraflar halinde, Türkçe olarak ver."
+                )
 
-        # Güncel model adı kullanıldı: gemini-3.8-flash
-        response = client.models.generate_content(
-            model="gemini-3.8-flash",
-            contents=full_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                tools=[{"google_search": {}}],
-                temperature=0.3,
-            ),
-        )
+                # PDF varsa ve soru PDF ile ilgiliyse bağlamı ekle, yoksa sadece prompt gönder
+                if pdf_context and any(kw in prompt.lower() for kw in ["pdf", "özet", "oku", "belge", "metin"]):
+                    # PDF metnini çok uzun tutmamak için ilk 15000 karakterle sınırla
+                    full_prompt = f"PDF İçeriği:\n---\n{pdf_context[:15000]}\n---\n\nKullanıcı İsteği: {prompt}"
+                else:
+                    full_prompt = prompt
 
-        answer = response.text
-        st.markdown(answer)
+                # Model: gemini-2.5-flash (Ücretsiz katmanda Google Arama destekler)
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=full_prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        tools=[{"google_search": {}}], # Arama aracı
+                    ),
+                )
 
-        # Metni Ses Dosyasına Çevirme (gTTS)
-        audio_file_path = f"temp_audio_{len(st.session_state.messages)}.mp3"
-        tts = gTTS(text=answer, lang="tr", slow=False)
-        tts.save(audio_file_path)
+                answer = response.text
+                st.markdown(answer)
 
-        # Ses oynatıcıyı arayüze ekle
-        st.audio(audio_file_path, format="audio/mp3")
+                # Edge TTS ile sesi oluştur (asenkron fonksiyonu çalıştır)
+                audio_bytes = asyncio.run(generate_audio(answer))
+                
+                # Ses oynatıcı
+                st.audio(audio_bytes, format="audio/mp3")
 
-        # Mesajı ve ses dosyası yolunu hafızaya kaydet
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": answer,
-            "audio_path": audio_file_path,
-        })
+                st.session_state.messages.append({"role": "assistant", "content": answer})
 
-      except Exception as e:
-        st.error(f"Bir hata oluştu: {e}")
+            except Exception as e:
+                st.error(f"Bir hata oluştu: {e}")
